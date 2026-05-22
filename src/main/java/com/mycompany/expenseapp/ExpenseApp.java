@@ -14,6 +14,11 @@ import javax.swing.*;
 import javax.swing.border.*;
 import java.awt.*;
 import java.awt.event.*;
+import java.io.*;
+import java.nio.file.*;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
 
 public class ExpenseApp extends JFrame {
 
@@ -21,6 +26,11 @@ public class ExpenseApp extends JFrame {
     private JTextField educationField, medicalField, entertainmentField;
     private JTextField incomeField;
     private JTextArea  resultArea;
+
+    // History file saved next to the running jar / project root
+    private static final String HISTORY_FILE = "expense_history.txt";
+    private static final DateTimeFormatter DT_FMT =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd  HH:mm:ss");
 
     private static final Color CLR_BG       = new Color(15,  17,  26);
     private static final Color CLR_PANEL    = new Color(24,  27,  42);
@@ -33,11 +43,12 @@ public class ExpenseApp extends JFrame {
     private static final Color CLR_TEXT     = new Color(220, 225, 245);
     private static final Color CLR_SUBTEXT  = new Color(140, 148, 180);
     private static final Color CLR_TERMINAL = new Color(10,  12,  20);
+    private static final Color CLR_HISTORY  = new Color(18,  20,  35);
 
     public ExpenseApp() {
         setTitle(" Expense Tracker System");
-        setSize(1050, 680);
-        setMinimumSize(new Dimension(900, 600));
+        setSize(1050, 700);
+        setMinimumSize(new Dimension(900, 620));
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLocationRelativeTo(null);
         getContentPane().setBackground(CLR_BG);
@@ -49,6 +60,10 @@ public class ExpenseApp extends JFrame {
         root.add(buildButtonBar(),   BorderLayout.SOUTH);
         add(root);
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // UI Building
+    // ─────────────────────────────────────────────────────────────────────────
 
     private JPanel buildHeader() {
         JPanel header = new JPanel() {
@@ -174,14 +189,17 @@ public class ExpenseApp extends JFrame {
         bar.setBackground(CLR_BG);
         bar.setBorder(BorderFactory.createEmptyBorder(4, 0, 10, 0));
 
-        JButton calcBtn  = makeButton("  Calculate  ", CLR_GREEN);
-        JButton clearBtn = makeButton("  Clear  ",     CLR_RED);
+        JButton calcBtn    = makeButton("  Calculate  ",    CLR_GREEN);
+        JButton clearBtn   = makeButton("  Clear  ",        CLR_RED);
+        JButton historyBtn = makeButton("  View History  ", CLR_ACCENT);
 
-        calcBtn.addActionListener(e  -> calculateExpenses());
-        clearBtn.addActionListener(e -> clearFields());
+        calcBtn.addActionListener(e    -> calculateExpenses());
+        clearBtn.addActionListener(e   -> clearFields());
+        historyBtn.addActionListener(e -> showHistoryDialog());
 
         bar.add(calcBtn);
         bar.add(clearBtn);
+        bar.add(historyBtn);
         return bar;
     }
 
@@ -201,6 +219,10 @@ public class ExpenseApp extends JFrame {
         return btn;
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Core Logic
+    // ─────────────────────────────────────────────────────────────────────────
+
     private void calculateExpenses() {
         try {
             double income        = parseField(incomeField,        "Monthly Income");
@@ -218,9 +240,12 @@ public class ExpenseApp extends JFrame {
             Expense e5 = new MedicalExpense(medical);
             Expense e6 = new EntertainmentExpense(entertainment);
 
+            String timestamp = LocalDateTime.now().format(DT_FMT);
+
             StringBuilder report = new StringBuilder();
             report.append("╔══════════════════════════════════════╗\n");
-            report.append("║         EXPENSE REPORT             ║\n");
+            report.append("║         EXPENSE REPORT               ║\n");
+            report.append("║  📅  ").append(timestamp).append("   ║\n");
             report.append("╚══════════════════════════════════════╝\n\n");
 
             e1.showExpense(report);
@@ -251,13 +276,139 @@ public class ExpenseApp extends JFrame {
 
             report.append("══════════════════════════════════════\n");
 
+            String reportText = report.toString();
+
+            // Show in result area
             resultArea.setForeground(remaining >= 0 ? CLR_GREEN : CLR_RED);
-            resultArea.setText(report.toString());
+            resultArea.setText(reportText);
+
+            // ── Save to history file ──────────────────────────────────────────
+            saveToHistory(reportText);
 
         } catch (IllegalArgumentException ex) {
             JOptionPane.showMessageDialog(this, ex.getMessage(), "Input Error", JOptionPane.ERROR_MESSAGE);
         }
     }
+
+    /**
+     * Appends the given report text to the history TXT file.
+     */
+    private void saveToHistory(String reportText) {
+        try (FileWriter fw = new FileWriter(HISTORY_FILE, true);
+             BufferedWriter bw = new BufferedWriter(fw)) {
+            bw.write(reportText);
+            bw.newLine();
+            bw.write("▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓");
+            bw.newLine();
+            bw.newLine();
+        } catch (IOException ex) {
+            JOptionPane.showMessageDialog(this,
+                    "Could not save history:\n" + ex.getMessage(),
+                    "File Error", JOptionPane.WARNING_MESSAGE);
+        }
+    }
+
+    /**
+     * Reads the full history file and displays it in a styled dialog.
+     * Current session's result is shown at the top, then all history below.
+     */
+    private void showHistoryDialog() {
+        // Read history file
+        String historyContent;
+        File hFile = new File(HISTORY_FILE);
+        if (!hFile.exists() || hFile.length() == 0) {
+            historyContent = "  No history found yet.\n  Run a calculation first to save history.";
+        } else {
+            try {
+                List<String> lines = Files.readAllLines(hFile.toPath());
+                historyContent = String.join("\n", lines);
+            } catch (IOException ex) {
+                historyContent = "Error reading history file:\n" + ex.getMessage();
+            }
+        }
+
+        // ── Build dialog ─────────────────────────────────────────────────────
+        JDialog dialog = new JDialog(this, "📋  Calculation History", true);
+        dialog.setSize(680, 580);
+        dialog.setLocationRelativeTo(this);
+        dialog.getContentPane().setBackground(CLR_BG);
+        dialog.setLayout(new BorderLayout(0, 0));
+
+        // Title bar inside dialog
+        JLabel dlgTitle = new JLabel("  All Previous Calculations", JLabel.LEFT);
+        dlgTitle.setFont(new Font("Segoe UI", Font.BOLD, 16));
+        dlgTitle.setForeground(CLR_ACCENT);
+        dlgTitle.setBackground(CLR_PANEL);
+        dlgTitle.setOpaque(true);
+        dlgTitle.setBorder(BorderFactory.createEmptyBorder(14, 18, 14, 18));
+
+        // File path hint
+        JLabel fileLbl = new JLabel("  Saved in:  " + hFile.getAbsolutePath());
+        fileLbl.setFont(new Font("Consolas", Font.PLAIN, 11));
+        fileLbl.setForeground(CLR_SUBTEXT);
+        fileLbl.setBackground(CLR_PANEL);
+        fileLbl.setOpaque(true);
+        fileLbl.setBorder(BorderFactory.createEmptyBorder(0, 18, 12, 18));
+
+        JPanel topPanel = new JPanel(new BorderLayout());
+        topPanel.setBackground(CLR_PANEL);
+        topPanel.add(dlgTitle, BorderLayout.NORTH);
+        topPanel.add(fileLbl,  BorderLayout.SOUTH);
+
+        // History text area
+        JTextArea histArea = new JTextArea(historyContent);
+        histArea.setFont(new Font("Consolas", Font.PLAIN, 12));
+        histArea.setBackground(CLR_HISTORY);
+        histArea.setForeground(CLR_GREEN);
+        histArea.setEditable(false);
+        histArea.setBorder(BorderFactory.createEmptyBorder(14, 16, 14, 16));
+
+        JScrollPane sp = new JScrollPane(histArea);
+        sp.setBorder(BorderFactory.createLineBorder(CLR_BORDER, 1));
+        sp.getViewport().setBackground(CLR_HISTORY);
+        sp.setBorder(BorderFactory.createEmptyBorder(10, 14, 0, 14));
+
+        // Scroll to top so newest (appended last) is shown — user can scroll down
+        histArea.setCaretPosition(0);
+
+        // Bottom button bar
+        JPanel btnBar = new JPanel(new FlowLayout(FlowLayout.CENTER, 16, 12));
+        btnBar.setBackground(CLR_BG);
+
+        JButton clearHistBtn = makeButton("  Clear History  ", CLR_RED);
+        JButton closeBtn     = makeButton("  Close  ",         CLR_ACCENT);
+
+        clearHistBtn.addActionListener(e -> {
+            int confirm = JOptionPane.showConfirmDialog(dialog,
+                    "Are you sure you want to delete all saved history?",
+                    "Confirm Delete", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+            if (confirm == JOptionPane.YES_OPTION) {
+                try {
+                    new FileWriter(HISTORY_FILE, false).close(); // truncate file
+                    histArea.setText("  History cleared.\n  Run a new calculation to start fresh.");
+                    histArea.setForeground(CLR_YELLOW);
+                } catch (IOException ex) {
+                    JOptionPane.showMessageDialog(dialog,
+                            "Could not clear history:\n" + ex.getMessage(),
+                            "Error", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        });
+
+        closeBtn.addActionListener(e -> dialog.dispose());
+
+        btnBar.add(clearHistBtn);
+        btnBar.add(closeBtn);
+
+        dialog.add(topPanel, BorderLayout.NORTH);
+        dialog.add(sp,       BorderLayout.CENTER);
+        dialog.add(btnBar,   BorderLayout.SOUTH);
+        dialog.setVisible(true);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Helpers
+    // ─────────────────────────────────────────────────────────────────────────
 
     private double parseField(JTextField field, String name) {
         String text = field.getText().trim();
